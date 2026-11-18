@@ -1,0 +1,7 @@
+node_modules/
+.DS_Store
+*.local.json
+.env
+
+# Graphify 知識圖譜（由 setup script 或 `graphify extract . --code-only` 重建）
+graphify-out/
