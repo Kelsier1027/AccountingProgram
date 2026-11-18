@@ -1,0 +1,47 @@
+name: update-prices
+
+# Fetches stock quotes and FX rates server-side (browsers can't call these APIs because of CORS)
+# and commits data/prices.json. 這個 workflow 放在『資料 repo』，程式從公開 repo checkout 到 code/。 The web app's "更新股價" button triggers this via workflow_dispatch.
+on:
+  schedule:
+    - cron: '40 6 * * 1-5'   # 14:40 Taipei, after the TWSE close
+    - cron: '30 21 * * 1-5'  # after the US close
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-prices
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: Kelsier1027/AccountingProgram   # 公開的程式 repo
+          path: code
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Fetch quotes
+        run: node code/tools/update-prices.mjs data
+      - name: Commit if changed
+        run: |
+          if git diff --quiet -- data/prices.json; then
+            echo "No price changes"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/prices.json
+          git commit -m "prices: update $(date -u +%Y-%m-%dT%H:%MZ)"
+          for i in 1 2 3; do
+            git pull --rebase --autostash && git push && exit 0
+            sleep $((i * 5))
+          done
+          exit 1

@@ -1,0 +1,26 @@
+name: validate
+# 資料 repo 的守門：帳本格式檢查（加密時略過，CI 沒有密碼）
+on:
+  push:
+    paths: ['data/ledger.json']
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: Kelsier1027/AccountingProgram
+          path: code
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: |
+          if grep -Eq '"encrypted"[[:space:]]*:[[:space:]]*true' data/ledger.json; then
+            echo "Ledger is encrypted; skipping format validation."
+          else
+            LEDGER_DIR=data node code/tools/ledger.mjs validate
+          fi

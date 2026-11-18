@@ -1,0 +1,15 @@
+// Cloudflare Workers deployment for the static app (no server code).
+// Only the app/ folder is uploaded; data/ (the ledger) is never published.
+{
+  "name": "accountingprogram",
+  "compatibility_date": "2026-11-16",
+  "assets": {
+    "directory": "./app"
+  },
+  // Production is served on <name>.<subdomain>.workers.dev.
+  "workers_dev": true,
+  "preview_urls": false,
+  // Required by `wrangler preview`, which Workers Builds runs for
+  // non-production branches (e.g. pull requests). Empty = defaults.
+  "previews": {}
+}
