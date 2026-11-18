@@ -30,3 +30,10 @@ LEDGER_DIR=data node code/tools/ledger.mjs summary
 
 - 公開 repo 的 `test.yml` 不再驗證 `ledger.json`；改由資料 repo 的 `validate.yml` 檢查。
 - 股價排程在資料 repo 執行（Actions 分鐘數算在私有 repo 額度）。
+
+## 遷移時常踩的坑
+
+- **Cloudflare 連線會失效**：舊 repo 改名後再新建同名 repo，在 GitHub 看來是不同的 repo（內部 ID 不同），Cloudflare 的 GitHub 應用程式授權仍只對得到舊的。症狀：Worker 的 Settings → Builds 顯示「已與您的 Git 帳戶中斷連線」，建置一直失敗、線上停在舊版。處理：GitHub → Settings → Applications → Installed GitHub Apps → Cloudflare Workers and Pages → Configure，把新 repo 加進 Repository access，再到 Cloudflare 重新連線 Git 存放庫（分支 `main`、組建命令留空、部署命令 `npx wrangler deploy`）。
+- **重新連線不會自動建置**：要有新的 commit 合併進 `main`，或在 Cloudflare 手動觸發，才會產生新的建置。
+- **建置失敗時線上仍是舊版**：Workers 會繼續提供上一個成功的部署，所以網站看起來正常。部署後用 `curl` 比對 `app/js/` 的檔案內容確認是否為新版。
+- **Secret Protection**：GitHub 新版把 Secret scanning 改名為 Secret Protection（Settings → Advanced Security）；公開 repo 預設已啟用，另外確認 Push protection 為 On。
