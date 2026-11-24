@@ -44,7 +44,8 @@ const VOID = /作廢|註銷|void/i;
  * Parse the Ministry of Finance e-invoice export.
  * Pipe format:  M|載具名稱|載具號碼|發票日期|商店統編|商店店名|發票號碼|總金額|發票狀態|
  *               D|發票號碼|小計|品項名稱|
- * Also accepts a headered CSV that has 發票號碼 / 發票日期 / 店名 / 金額 columns (one row per invoice or per item).
+ * Also accepts a headered CSV that has 發票號碼 / 發票日期 / 店名 / 金額 columns (one row per invoice or per item),
+ * including the 發票存摺 app export (消費時間, 發票號碼, 店家名稱, 賣方統編, 消費品項, 單價, 個數, 小計, 總計, 備註).
  */
 export function parseEInvoice(text) {
   const src = String(text || '').replace(/^﻿/, '');
@@ -91,19 +92,24 @@ export function parseEInvoice(text) {
     return -1;
   };
   const iNo = col('發票號碼', 'invoice');
-  const iDate = col('發票日期', '消費日期', '日期', 'date');
-  const iShop = col('賣方名稱', '商店名稱', '店名', '商店店名', 'merchant');
+  const iDate = col('發票日期', '消費日期', '消費時間', '日期', 'date');
+  const iShop = col('賣方名稱', '商店名稱', '店家名稱', '店名', '商店店名', 'merchant');
   const iTaxId = col('賣方統一編號', '商店統編', '賣方統編');
   const iTotal = col('發票總金額', '總金額', '發票金額', 'total');
   const iItem = col('消費明細_品名', '品名', '品項名稱', '品項', 'item');
   const iSub = col('消費明細_金額', '明細金額', '小計', '品項金額', 'amount');
-  const iQty = col('消費明細_數量', '數量', 'qty');
+  const iQty = col('消費明細_數量', '數量', '個數', 'qty');
   const iPrice = col('消費明細_單價', '單價', 'price');
+  // 發票存摺: 總計 is the invoice total, written once on the invoice's first row. It is what was
+  // charged, so it wins over the line sum (foreign e-services list lines before tax; some
+  // discounts are not spread over the lines).
+  const iGrand = head.findIndex((h) => h === '總計');
   const iStatus = col('發票狀態', '狀態', 'status');
   const iCarrier = col('載具自訂名稱', '載具名稱', '載具', 'carrier');
   if (iNo < 0 || iDate < 0) return [];
   const itemAmountCol = iSub >= 0 && iSub !== iTotal ? iSub : -1;
   const totals = new Map(); // invoiceNo -> values seen in the total column
+  const grand = new Map(); // invoiceNo -> 總計 (發票存摺 export)
   let lastItem = null;
   for (const r of rows.slice(1)) {
     // a product name with a line break is exported unquoted: the rest of the name is a row of its own
@@ -127,12 +133,13 @@ export function parseEInvoice(text) {
       totals.set(no, []);
     }
     if (iTotal >= 0 && r[iTotal] !== '') totals.get(no).push(num(r[iTotal]));
+    if (iGrand >= 0 && (r[iGrand] || '').trim() !== '' && !grand.has(no)) grand.set(no, num(r[iGrand]));
     const name = iItem >= 0 ? (r[iItem] || '').trim() : '';
     const lineAmount = itemAmountCol >= 0 ? num(r[itemAmountCol]) : iTotal >= 0 ? num(r[iTotal]) : 0;
     if (name || lineAmount) {
       const item = { name: name || '（未命名品項）', amount: lineAmount };
-      if (iQty >= 0 && r[iQty] !== '') item.qty = num(r[iQty]);
-      if (iPrice >= 0 && r[iPrice] !== '') item.price = num(r[iPrice]);
+      if (iQty >= 0 && r[iQty] !== '') item.qty = Math.round(num(r[iQty]) * 1000) / 1000;
+      if (iPrice >= 0 && r[iPrice] !== '') item.price = Math.round(num(r[iPrice]) * 1000) / 1000;
       inv.items.push(item);
       lastItem = item;
     }
@@ -144,12 +151,18 @@ export function parseEInvoice(text) {
     // A real per-invoice total is repeated unchanged on every row; when it varies per row it is
     // a line amount. Prefer the line items whenever they exist.
     inv.amount = inv.items.length && (itemAmountCol >= 0 || repeatedTotal === null) ? itemSum : repeatedTotal ?? itemSum;
+    if (grand.has(inv.invoiceNo)) {
+      inv.amount = grand.get(inv.invoiceNo);
+      // keep the items adding up to the total, with the same line the Moneybook import writes
+      const diff = round2(inv.amount - itemSum);
+      if (diff) inv.items.push({ name: diff > 0 ? '稅額／差額（依發票總額）' : '折讓／差額（依發票總額）', qty: 1, price: diff, amount: diff });
+    }
   }
   return [...invoices.values()];
 }
 
 const CATEGORY_HINTS = [
-  [/爭鮮|壽司|迴轉|skylark|sukiya|すき家|吉野家|潮味決|煎餅|早餐|牛肉麵|拉麵|火鍋|涮涮|燒肉|便當|自助餐/i, '餐飲'],
+  [/爭鮮|壽司|迴轉|skylark|sukiya|すき家|吉野家|潮味決|煎餅|早餐|牛肉麵|拉麵|火鍋|涮涮|燒肉|便當|自助餐|小吃/i, '餐飲'],
   [/全家|7-?eleven|統一超商|萊爾富|ok超商|麥當勞|摩斯|星巴克|路易莎|餐|飯|麵|食|咖啡|便當|飲/i, '餐飲'],
   [/富胖達|foodpanda|優食|uber ?eats/i, '餐飲'],
   [/全聯|家樂福|好市多|costco|屈臣氏|康是美|寶雅|大買家|美廉社|康達盛通|生活館|五金|宜家|ikea|特力屋|無印良品|小北百貨|生鮮超市|超市/i, '日用品'],
@@ -158,7 +171,7 @@ const CATEGORY_HINTS = [
   [/中華電信|台灣大哥大|遠傳|台灣之星|亞太電信|寬頻|光世代|網路費|上網|月租費/i, '電信網路'],
   [/醫院|診所|藥局|藥妝/i, '醫療'],
   [/電影|影城|netflix|spotify|steam|valve|遊戲|健身|健康世界|world ?gy|百樂園|旅行社|易遊網/i, '娛樂'],
-  [/momo|富邦媒體|蝦皮|pchome|網路家庭|博客來|amazon|uniqlo|購物|小米|燦坤|全國電子|順發/i, '購物'],
+  [/momo|富邦媒體|蝦皮|pchome|網路家庭|博客來|amazon|uniqlo|購物|小米|燦坤|全國電子|順發|優衣庫/i, '購物'],
   [/anthropic|openai|apple distribution|google|microsoft|adobe|自動扣款|subscription|訂閱|in-app|無廣告/i, '訂閱'],
   // food words on the line items (stores like 和德昌 = a McDonald's franchise say nothing)
   [/料理|小館|餐館|堡|薯|雞塊|雞翅|拉麵|河粉|粄條|春捲|三明治|甜甜圈|可麗露|飯糰|手卷|牛肉湯|豆漿|奶茶|可頌|鍋|蛋撻|盤|壽司|丼|爭鮮|肯德基/, '餐飲'],
@@ -192,7 +205,7 @@ export function importInvoices(ledger, invoices) {
     const net = round2(inv.amount);
     const fields = {
       date: inv.date, amount: Math.abs(net), type: net < 0 ? 'income' : 'expense',
-      merchant: inv.merchant, items: inv.items, carrier: inv.carrier,
+      merchant: inv.merchant, items: inv.items, ...(inv.carrier ? { carrier: inv.carrier } : {}),
       ...(inv.taxId ? { taxId: inv.taxId } : {}),
     };
     let existing = byNo.get(inv.invoiceNo);
