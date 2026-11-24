@@ -44,7 +44,8 @@ const VOID = /作廢|註銷|void/i;
  * Parse the Ministry of Finance e-invoice export.
  * Pipe format:  M|載具名稱|載具號碼|發票日期|商店統編|商店店名|發票號碼|總金額|發票狀態|
  *               D|發票號碼|小計|品項名稱|
- * Also accepts a headered CSV that has 發票號碼 / 發票日期 / 店名 / 金額 columns (one row per invoice or per item).
+ * Also accepts a headered CSV that has 發票號碼 / 發票日期 / 店名 / 金額 columns (one row per invoice or per item),
+ * including the 發票存摺 app export (消費時間, 發票號碼, 店家名稱, 賣方統編, 消費品項, 單價, 個數, 小計, 總計, 備註).
  */
 export function parseEInvoice(text) {
   const src = String(text || '').replace(/^﻿/, '');
@@ -91,19 +92,24 @@ export function parseEInvoice(text) {
     return -1;
   };
   const iNo = col('發票號碼', 'invoice');
-  const iDate = col('發票日期', '消費日期', '日期', 'date');
-  const iShop = col('賣方名稱', '商店名稱', '店名', '商店店名', 'merchant');
+  const iDate = col('發票日期', '消費日期', '消費時間', '日期', 'date');
+  const iShop = col('賣方名稱', '商店名稱', '店家名稱', '店名', '商店店名', 'merchant');
   const iTaxId = col('賣方統一編號', '商店統編', '賣方統編');
   const iTotal = col('發票總金額', '總金額', '發票金額', 'total');
   const iItem = col('消費明細_品名', '品名', '品項名稱', '品項', 'item');
   const iSub = col('消費明細_金額', '明細金額', '小計', '品項金額', 'amount');
-  const iQty = col('消費明細_數量', '數量', 'qty');
+  const iQty = col('消費明細_數量', '數量', '個數', 'qty');
   const iPrice = col('消費明細_單價', '單價', 'price');
+  // 發票存摺: 總計 is the invoice total, written once on the invoice's first row. It is what was
+  // charged, so it wins over the line sum (foreign e-services list lines before tax; some
+  // discounts are not spread over the lines).
+  const iGrand = head.findIndex((h) => h === '總計');
   const iStatus = col('發票狀態', '狀態', 'status');
   const iCarrier = col('載具自訂名稱', '載具名稱', '載具', 'carrier');
   if (iNo < 0 || iDate < 0) return [];
   const itemAmountCol = iSub >= 0 && iSub !== iTotal ? iSub : -1;
   const totals = new Map(); // invoiceNo -> values seen in the total column
+  const grand = new Map(); // invoiceNo -> 總計 (發票存摺 export)
   let lastItem = null;
   for (const r of rows.slice(1)) {
     // a product name with a line break is exported unquoted: the rest of the name is a row of its own
@@ -127,6 +133,7 @@ export function parseEInvoice(text) {
       totals.set(no, []);
     }
     if (iTotal >= 0 && r[iTotal] !== '') totals.get(no).push(num(r[iTotal]));
+    if (iGrand >= 0 && (r[iGrand] || '').trim() !== '' && !grand.has(no)) grand.set(no, num(r[iGrand]));
     const name = iItem >= 0 ? (r[iItem] || '').trim() : '';
     const lineAmount = itemAmountCol >= 0 ? num(r[itemAmountCol]) : iTotal >= 0 ? num(r[iTotal]) : 0;
     if (name || lineAmount) {
@@ -144,6 +151,7 @@ export function parseEInvoice(text) {
     // A real per-invoice total is repeated unchanged on every row; when it varies per row it is
     // a line amount. Prefer the line items whenever they exist.
     inv.amount = inv.items.length && (itemAmountCol >= 0 || repeatedTotal === null) ? itemSum : repeatedTotal ?? itemSum;
+    if (grand.has(inv.invoiceNo)) inv.amount = grand.get(inv.invoiceNo);
   }
   return [...invoices.values()];
 }

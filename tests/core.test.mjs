@@ -310,6 +310,35 @@ const PLATFORM_CSV = [
   '',
 ].join('\n');
 
+const WALLET_CSV = [
+  '消費時間,發票號碼,店家名稱,賣方統編,消費品項,單價,個數,小計,總計,備註',
+  '2026/11/01 11:00:21,ZZ00000001,測試生活館,11111111,清潔劑,70,1,53,194,',
+  '2026/11/01 11:00:21,ZZ00000001,測試生活館,11111111,拖把,108,1,98,,',
+  '2026/11/01 11:00:21,ZZ00000001,測試生活館,11111111,海綿,50,1,43,,',
+  '2026/11/02 12:07:24,ZZ00000002,測試加油站,22222222,95無鉛汽油,32.7,3.51,115,112,',
+  '2026/11/02 12:07:24,ZZ00000002,測試加油站,22222222,95無鉛汽油折抵額,-1,3,-3,,',
+  '2026/11/03 08:00:00,ZZ00000003,測試便利店,33333333,"Cannelé, 兩顆",160,1,160,160,',
+  '2026/11/04 09:00:00,ZZ00000004,測試訂閱服務,44444444,Premium,456,1,456,479,',
+  '2026/11/05 19:00:00,ZZ00000005,測試壽司店,55555555,壽司,400,2,800,770,',
+  '',
+].join('\n');
+
+test('發票存摺 app export: 消費時間 / 店家名稱 / 總計 columns, one invoice per number', () => {
+  const inv = parseEInvoice(WALLET_CSV);
+  const by = Object.fromEntries(inv.map((i) => [i.invoiceNo, i]));
+  assert.equal(inv.length, 5);
+  assert.equal(by.ZZ00000001.date, '2026-11-01'); // the time of day is dropped
+  assert.equal(by.ZZ00000001.merchant, '測試生活館');
+  assert.equal(by.ZZ00000001.taxId, '11111111');
+  assert.equal(by.ZZ00000001.amount, 194); // sum of the 小計 lines = 總計
+  assert.equal(by.ZZ00000001.items.length, 3);
+  assert.equal(by.ZZ00000002.amount, 112); // discount line included
+  assert.equal(by.ZZ00000002.items[0].qty, 3.51);
+  assert.equal(by.ZZ00000003.items[0].name, 'Cannelé, 兩顆'); // quoted comma kept
+  assert.equal(by.ZZ00000004.amount, 479); // 總計 includes the tax the line leaves out
+  assert.equal(by.ZZ00000005.amount, 770); // and a discount that is not spread over the lines
+});
+
 test('e-invoice platform CSV: one invoice per number, total = all lines incl. discounts', () => {
   const inv = parseEInvoice(PLATFORM_CSV);
   const by = Object.fromEntries(inv.map((i) => [i.invoiceNo, i]));
