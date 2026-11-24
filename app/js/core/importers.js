@@ -138,8 +138,8 @@ export function parseEInvoice(text) {
     const lineAmount = itemAmountCol >= 0 ? num(r[itemAmountCol]) : iTotal >= 0 ? num(r[iTotal]) : 0;
     if (name || lineAmount) {
       const item = { name: name || '（未命名品項）', amount: lineAmount };
-      if (iQty >= 0 && r[iQty] !== '') item.qty = num(r[iQty]);
-      if (iPrice >= 0 && r[iPrice] !== '') item.price = num(r[iPrice]);
+      if (iQty >= 0 && r[iQty] !== '') item.qty = Math.round(num(r[iQty]) * 1000) / 1000;
+      if (iPrice >= 0 && r[iPrice] !== '') item.price = Math.round(num(r[iPrice]) * 1000) / 1000;
       inv.items.push(item);
       lastItem = item;
     }
@@ -151,13 +151,18 @@ export function parseEInvoice(text) {
     // A real per-invoice total is repeated unchanged on every row; when it varies per row it is
     // a line amount. Prefer the line items whenever they exist.
     inv.amount = inv.items.length && (itemAmountCol >= 0 || repeatedTotal === null) ? itemSum : repeatedTotal ?? itemSum;
-    if (grand.has(inv.invoiceNo)) inv.amount = grand.get(inv.invoiceNo);
+    if (grand.has(inv.invoiceNo)) {
+      inv.amount = grand.get(inv.invoiceNo);
+      // keep the items adding up to the total, with the same line the Moneybook import writes
+      const diff = round2(inv.amount - itemSum);
+      if (diff) inv.items.push({ name: diff > 0 ? '稅額／差額（依發票總額）' : '折讓／差額（依發票總額）', qty: 1, price: diff, amount: diff });
+    }
   }
   return [...invoices.values()];
 }
 
 const CATEGORY_HINTS = [
-  [/爭鮮|壽司|迴轉|skylark|sukiya|すき家|吉野家|潮味決|煎餅|早餐|牛肉麵|拉麵|火鍋|涮涮|燒肉|便當|自助餐/i, '餐飲'],
+  [/爭鮮|壽司|迴轉|skylark|sukiya|すき家|吉野家|潮味決|煎餅|早餐|牛肉麵|拉麵|火鍋|涮涮|燒肉|便當|自助餐|小吃/i, '餐飲'],
   [/全家|7-?eleven|統一超商|萊爾富|ok超商|麥當勞|摩斯|星巴克|路易莎|餐|飯|麵|食|咖啡|便當|飲/i, '餐飲'],
   [/富胖達|foodpanda|優食|uber ?eats/i, '餐飲'],
   [/全聯|家樂福|好市多|costco|屈臣氏|康是美|寶雅|大買家|美廉社|康達盛通|生活館|五金|宜家|ikea|特力屋|無印良品|小北百貨|生鮮超市|超市/i, '日用品'],
@@ -166,7 +171,7 @@ const CATEGORY_HINTS = [
   [/中華電信|台灣大哥大|遠傳|台灣之星|亞太電信|寬頻|光世代|網路費|上網|月租費/i, '電信網路'],
   [/醫院|診所|藥局|藥妝/i, '醫療'],
   [/電影|影城|netflix|spotify|steam|valve|遊戲|健身|健康世界|world ?gy|百樂園|旅行社|易遊網/i, '娛樂'],
-  [/momo|富邦媒體|蝦皮|pchome|網路家庭|博客來|amazon|uniqlo|購物|小米|燦坤|全國電子|順發/i, '購物'],
+  [/momo|富邦媒體|蝦皮|pchome|網路家庭|博客來|amazon|uniqlo|購物|小米|燦坤|全國電子|順發|優衣庫/i, '購物'],
   [/anthropic|openai|apple distribution|google|microsoft|adobe|自動扣款|subscription|訂閱|in-app|無廣告/i, '訂閱'],
   // food words on the line items (stores like 和德昌 = a McDonald's franchise say nothing)
   [/料理|小館|餐館|堡|薯|雞塊|雞翅|拉麵|河粉|粄條|春捲|三明治|甜甜圈|可麗露|飯糰|手卷|牛肉湯|豆漿|奶茶|可頌|鍋|蛋撻|盤|壽司|丼|爭鮮|肯德基/, '餐飲'],
@@ -200,7 +205,7 @@ export function importInvoices(ledger, invoices) {
     const net = round2(inv.amount);
     const fields = {
       date: inv.date, amount: Math.abs(net), type: net < 0 ? 'income' : 'expense',
-      merchant: inv.merchant, items: inv.items, carrier: inv.carrier,
+      merchant: inv.merchant, items: inv.items, ...(inv.carrier ? { carrier: inv.carrier } : {}),
       ...(inv.taxId ? { taxId: inv.taxId } : {}),
     };
     let existing = byNo.get(inv.invoiceNo);

@@ -337,6 +337,26 @@ test('發票存摺 app export: 消費時間 / 店家名稱 / 總計 columns, one
   assert.equal(by.ZZ00000003.items[0].name, 'Cannelé, 兩顆'); // quoted comma kept
   assert.equal(by.ZZ00000004.amount, 479); // 總計 includes the tax the line leaves out
   assert.equal(by.ZZ00000005.amount, 770); // and a discount that is not spread over the lines
+  // the items still add up to the total, using the line the Moneybook import writes
+  assert.deepEqual(by.ZZ00000004.items.at(-1), { name: '稅額／差額（依發票總額）', qty: 1, price: 23, amount: 23 });
+  assert.equal(by.ZZ00000005.items.at(-1).name, '折讓／差額（依發票總額）');
+  for (const i of inv) assert.equal(i.items.reduce((s, x) => s + x.amount, 0), i.amount);
+});
+
+test('guessCategory: Uniqlo (優衣庫) is shopping, 小吃店 is food', () => {
+  assert.equal(guessCategory('台灣優衣庫有限公司', [{ name: '服飾', amount: 390 }]), '購物');
+  assert.equal(guessCategory('某某小吃店', [{ name: '沙朗牛排', amount: 290 }]), '餐飲');
+});
+
+test('發票存摺 import keeps the carrier and the balance line of an invoice already in the ledger', () => {
+  const l = emptyLedger();
+  upsert(l, 'transactions', { date: '2026-11-04', amount: 479, type: 'expense', source: 'invoice', invoiceNo: 'ZZ00000004', merchant: '測試訂閱服務',
+    carrier: '手機條碼', category: '訂閱', items: [{ name: 'Premium', amount: 456, qty: 1, price: 456 }, { name: '稅額／差額（依發票總額）', qty: 1, price: 23, amount: 23 }] });
+  const r = importInvoices(l, parseEInvoice(WALLET_CSV));
+  assert.equal(r.updated, 0);
+  const t = live(l.transactions).find((x) => x.invoiceNo === 'ZZ00000004');
+  assert.equal(t.carrier, '手機條碼');
+  assert.equal(t.category, '訂閱');
 });
 
 test('e-invoice platform CSV: one invoice per number, total = all lines incl. discounts', () => {
