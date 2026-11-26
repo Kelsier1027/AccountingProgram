@@ -8,6 +8,7 @@ import { renderStocks } from './views/stocks.js';
 import { renderAccounts, renderBills, renderLoans, renderIous } from './views/simple.js';
 import { renderSettings } from './views/settings.js';
 import { renderPlan } from './views/plan.js';
+import { renderSchedule } from './views/schedule.js';
 import { stampHtml, syncPillHtml } from './views/common.js';
 
 const ROUTES = {
@@ -17,6 +18,7 @@ const ROUTES = {
   cards: ['信用卡', renderCards],
   stocks: ['股票', renderStocks],
   plan: ['現金流規劃', renderPlan],
+  schedule: ['備款時程', renderSchedule],
   accounts: ['帳戶與資產', renderAccounts],
   bills: ['待繳', renderBills],
   loans: ['債務', renderLoans],
@@ -26,7 +28,7 @@ const ROUTES = {
 const TABS = ['overview', 'tx', 'match', 'stocks'];
 const GROUPS = [
   ['', ['overview', 'tx', 'match']],
-  ['資產', ['accounts', 'stocks', 'plan']],
+  ['資產', ['accounts', 'stocks', 'plan', 'schedule']],
   ['負債與待繳', ['cards', 'bills', 'loans', 'ious']],
   ['', ['settings']],
 ];

@@ -72,7 +72,11 @@ export function livingEstimate(ledger, today = ymd(), { oneOffThreshold = PLAN_D
 /** Every dated cash movement we already know about within the horizon. */
 export function scheduledFlows(ledger, today, until, { includeIncome = true } = {}) {
   const out = [];
-  const add = (date, amount, label, kind) => { if (amount && date <= until) out.push({ date: date < today ? today : date, amount: round2(amount), label, kind }); };
+  // `extra`: estimated (the amount may still change: charges not billed yet), dateGuess (the date is a
+  // guess: the bank's closing or due day is not set); `overdue` keeps the original date of an overdue item
+  const add = (date, amount, label, kind, extra = {}) => {
+    if (amount && date <= until) out.push({ date: date < today ? today : date, amount: round2(amount), label, kind, ...(date < today ? { overdue: date } : {}), ...extra });
+  };
 
   // credit cards, per bank: unpaid statements on their due dates, unbilled charges on the next due date
   for (const iss of live(ledger.issuers)) {
@@ -85,7 +89,7 @@ export function scheduledFlows(ledger, today, until, { includeIncome = true } = 
     const unbilled = round2(o.unbilled - (o.overpaid || 0));
     const closing = iss.statementDay ? nextDay(addDays(o.lastClose || today, 1) > today ? addDays(o.lastClose || today, 1) : today, iss.statementDay) : null;
     const due = closing && iss.dueDay ? nextDay(addDays(closing, 5), iss.dueDay) : addDays(today, 30);
-    if (unbilled > 0) add(due, -unbilled, `${iss.name} 未出帳（${closing ? `${closing.slice(5)} 結帳` : '結帳日未知，估 30 天後'}）`, 'card');
+    if (unbilled > 0) add(due, -unbilled, `${iss.name} 未出帳（${closing ? `${closing.slice(5)} 結帳` : '結帳日未知，估 30 天後'}）`, 'card', { estimated: true, dateGuess: !closing || !iss.dueDay });
     // installment plans: the rest of the periods land on the following bills, one a month
     for (const l of live(ledger.loans).filter((x) => x.kind === 'installment' && x.issuerId === iss.id)) {
       let left = loanBalance(ledger, l);

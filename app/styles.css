@@ -359,3 +359,12 @@ dialog::backdrop { background: rgb(10 20 18 / 0.45); }
 .page-section { margin: 24px 4px 8px; font-size: 1.05rem; color: var(--ink-2); }
 .seg { display: inline-flex; gap: 4px; }
 td.neg-strong { color: var(--crit-text); font-weight: 600; }
+
+/* 備款時程 */
+.sched-row td { vertical-align: top; }
+.sched-row.short td { background: color-mix(in srgb, var(--critical) 7%, transparent); }
+.sched-item { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 2px 0; }
+.sched-item + .sched-item { border-top: 1px dashed var(--rule); }
+.sched-item .num.inc { color: var(--ok-text); }
+.sched-kind { white-space: nowrap; }
+.sched-item > span:first-child { min-width: 0; }

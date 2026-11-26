@@ -4,9 +4,9 @@ const SHELL = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest', 'icon.svg',
   'js/main.js', 'js/store.js', 'js/github.js', 'js/ui.js', 'js/charts.js',
   'js/core/util.js', 'js/core/model.js', 'js/core/calc.js', 'js/core/match.js', 'js/core/importers.js',
-  'js/core/merge.js', 'js/core/crypto.js', 'js/core/sample.js', 'js/core/moneybook.js', 'js/core/plan.js', 'js/core/split.js', 'js/core/forecast.js', 'js/core/payslip.js',
+  'js/core/merge.js', 'js/core/crypto.js', 'js/core/sample.js', 'js/core/moneybook.js', 'js/core/plan.js', 'js/core/split.js', 'js/core/forecast.js', 'js/core/schedule.js', 'js/core/payslip.js',
   'js/views/common.js', 'js/views/overview.js', 'js/views/transactions.js', 'js/views/match.js',
-  'js/views/cards.js', 'js/views/stocks.js', 'js/views/simple.js', 'js/views/settings.js', 'js/views/moneybook.js', 'js/views/plan.js', 'js/views/split.js', 'js/views/forecast.js',
+  'js/views/cards.js', 'js/views/stocks.js', 'js/views/simple.js', 'js/views/settings.js', 'js/views/moneybook.js', 'js/views/plan.js', 'js/views/split.js', 'js/views/forecast.js', 'js/views/schedule.js',
 ];
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
