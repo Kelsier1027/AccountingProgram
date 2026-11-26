@@ -1090,3 +1090,48 @@ test('payment schedule: an overdue payment is due today and keeps its original d
   assert.equal(s.rows.length, 1);
   assert.deepEqual([s.rows[0].date, s.rows[0].items[0].dueDate, s.rows[0].shortfall], ['2026-11-26', '2026-11-06', 3000]);
 });
+
+test('CLI bank: showing a bank never rewrites the ledger; only a real change is saved', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const { mkdtempSync, writeFileSync, readFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const cli = fileURLToPath(new URL('../tools/ledger.mjs', import.meta.url));
+  const dir = mkdtempSync(join(tmpdir(), 'ledger-bank-'));
+  try {
+    const file = join(dir, 'ledger.json');
+    const l = emptyLedger();
+    upsert(l, 'issuers', { id: 'iss_a', name: '甲銀行', limit: 100000, statementDay: 20, dueDay: 5 });
+    writeFileSync(file, `${JSON.stringify(l, null, 1)}\n`);
+    const bytes = () => readFileSync(file, 'utf8');
+    const run = (...args) => spawnSync(process.execPath, [cli, 'bank', ...args, '--file', file], { encoding: 'utf8' });
+    const issuers = () => live(JSON.parse(bytes()).issuers);
+    const original = bytes();
+
+    // only looking, and setting what is already set: the file is not touched
+    const show = run('--bank', '甲銀行');
+    assert.equal(show.status, 0);
+    assert.match(show.stdout, /甲銀行.*結帳日 20.*繳款日 5/);
+    assert.equal(bytes(), original, 'a query must not rewrite the ledger');
+    assert.equal(run('--bank', '甲銀行', '--statement-day', '20', '--due-day', '5').status, 0);
+    assert.equal(bytes(), original, 'setting the same values is not a change');
+
+    // a bank that does not exist is an error, not a new bank
+    const missing = run('--bank', '不存在銀行');
+    assert.notEqual(missing.status, 0);
+    assert.match(missing.stderr, /找不到銀行/);
+    assert.equal(bytes(), original);
+
+    // a real change is saved
+    assert.equal(run('--bank', '甲銀行', '--statement-day', '27').status, 0);
+    assert.equal(issuers().find((i) => i.id === 'iss_a').statementDay, 27);
+    assert.notEqual(bytes(), original);
+
+    // a new bank needs at least one setting
+    assert.equal(run('--bank', '乙銀行', '--limit', '50000').status, 0);
+    assert.equal(issuers().find((i) => i.name === '乙銀行')?.limit, 50000);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
