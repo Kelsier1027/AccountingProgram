@@ -24,6 +24,7 @@
 //       匯入分帳 App 的帳期 CSV：對到帳本的付款就掛上分帳（只算自己的份），對方代付與找不到的另外記錄，還款沖銷欠款
 //   node tools/ledger.mjs forecast [--months 12] [--scenario conservative|expected]
 //       資金缺口預警：逐月現金流、何時開始不夠、最多缺多少，以及賣股票／借貸／其他方式的試算
+//   node tools/ledger.mjs schedule [--days N | --year]   備款時程：哪天前要備多少錢、繳哪些款項（預設 60 天）
 //   node tools/ledger.mjs list <collection>
 //   node tools/ledger.mjs encrypt | decrypt        (passphrase from LEDGER_PASSPHRASE)
 //
@@ -37,6 +38,7 @@ import { findMatches, applyLink, deleteInvoicesInRange } from '../app/js/core/ma
 import { parseEInvoice, importInvoices, parseCsv, cardRowsToTransactions, findHeaderRow, guessCardColumns, statementMeta, importBankStatement, looksLikeLayoutText, layoutToTransactions, applyStatementMeta, suggestInstallmentPlan, addInstallmentPlan } from '../app/js/core/importers.js';
 import { investmentPlan } from '../app/js/core/plan.js';
 import { cashForecast } from '../app/js/core/forecast.js';
+import { paymentSchedule, yearEnd } from '../app/js/core/schedule.js';
 import { importPayslips } from '../app/js/core/payslip.js';
 import { parseSplitCsv, importSplits } from '../app/js/core/split.js';
 import { splitBalances } from '../app/js/core/calc.js';
@@ -398,6 +400,27 @@ try {
       } else console.log(`不會出現資金缺口；最低點 ${f.low.date} ${formatMoney(f.low.balance)}`);
       console.log('\n月份      月初      收入   固定與卡費   日常支出      月底    當月最低');
       for (const m of f.months) console.log(`${m.month} ${fm(m.opening)} ${fm(m.income)} ${fm(-m.out)} ${fm(-m.living)} ${fm(m.closing)} ${fm(m.low)}`);
+      break;
+    }
+    case 'schedule': {
+      const today = ymd();
+      const s = paymentSchedule(ledger, prices, today, flags.year ? { until: yearEnd(today) } : { horizonDays: Number(flags.days) || 60 });
+      console.log(`備款時程 ${s.today} ～ ${s.until}｜可動用存款 ${formatMoney(s.cash.total)}｜期間繳款 ${formatMoney(s.outflowTotal)}、入帳 ${formatMoney(s.inflowTotal)}`);
+      if (s.first) {
+        const e = s.first;
+        console.log(`⚠ ${e.start} 前要備齊：缺口最多 ${formatMoney(e.amount)}（${e.lowDate}），${e.end ? `${e.end} 入帳後補回` : '期間內未補回'}`);
+        if (s.episodes.length > 1) console.log(`  期間內共 ${s.episodes.length} 段缺口，累計要再備 ${formatMoney(s.totalNeed)}`);
+      } else console.log(`✓ 期間內不需要補錢；最低餘額 ${formatMoney(s.low.balance)}（${s.low.date}）`);
+      console.log('\n日期     項目                                      金額      繳完餘額    要再備');
+      for (const r of s.rows) {
+        r.items.forEach((i, k) => {
+          const tag = [i.estimated ? '估計' : '', i.dateGuess ? '日期估' : '', i.shifted ? `原 ${i.dueDate.slice(5)}` : '', i.overdue ? `已逾期 ${i.overdue.slice(5)}` : ''].filter(Boolean).join('、');
+          const last = k === r.items.length - 1;
+          console.log(`${k ? '        ' : r.date.slice(5).padEnd(8)}${(i.label.slice(0, 26) + (tag ? `（${tag}）` : '')).padEnd(40)}${fm(i.amount)}${last ? fm(r.balance) : ''.padStart(12)}${last && r.raise ? fm(r.raise) : ''}`);
+        });
+      }
+      if (s.warnings.guessed.length) console.log(`\n注意：${s.warnings.guessed.join('、')} 沒設結帳日或繳款日，日期是估的（用 bank --bank <銀行> --statement-day N --due-day N 設定）`);
+      for (const a of s.warnings.staleAccounts) console.log(`注意：${a.name} 的餘額是 ${a.balanceDate} 的，可能已過期`);
       break;
     }
     case 'list': {

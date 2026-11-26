@@ -1,5 +1,6 @@
 import { store } from '../store.js';
 import { cashForecast } from '../core/forecast.js';
+import { paymentAlert } from '../core/schedule.js';
 import { totals, monthSummary, billStatus, snapshotOf, issuerUsage, statementIssuerId, isIncomeItem, isPayable, incomeStatus } from '../core/calc.js';
 import { live } from '../core/model.js';
 import { findMatches } from '../core/match.js';
@@ -28,6 +29,12 @@ export function renderOverview(root) {
   if (fc.need) {
     const soon = daysBetween(today, fc.need.start) <= 45;
     todo.push({ level: soon ? 'critical' : 'warning', text: `預計 ${fc.need.start} 起存款不足，未來一年最多缺約 ${formatMoney(Math.ceil(fc.need.amount / 1000) * 1000)}`, href: '#/plan' });
+  }
+  // known payments that the cash in the bank cannot cover soon (備款時程)
+  const pay = paymentAlert(L, P, today, 30);
+  if (pay) {
+    const md = (d) => `${Number(d.slice(5, 7))}/${Number(d.slice(8))}`;
+    todo.push({ level: pay.days <= 7 ? 'critical' : 'warning', text: `${md(pay.start)} 前需備款約 ${formatMoney(Math.ceil(pay.amount / 100) * 100)} 元（${pay.days <= 0 ? '今天' : `${pay.days} 天後`}）`, href: '#/schedule' });
   }
   for (const b of live(L.bills).filter(isPayable)) {
     const s = billStatus(b, today);

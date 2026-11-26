@@ -1004,3 +1004,89 @@ test('cash forecast: gap date and size, scenarios, planned items, remedies', asy
   assert.ok(e.need.amount < c.need.amount);
   assert.deepEqual(findGaps([{ date: '2026-12-01', balance: 5 }, { date: '2026-12-02', balance: -3 }, { date: '2026-12-03', balance: 1 }]).map((g) => [g.start, g.end, g.amount]), [['2026-12-02', '2026-12-03', 3]]);
 });
+
+// ---- 備款時程 (payment schedule) -------------------------------------------------------------
+function scheduleLedger(cash) {
+  const l = emptyLedger();
+  upsert(l, 'accounts', { name: '活存', type: 'bank', balance: cash });
+  upsert(l, 'issuers', { id: 'iss_a', name: '甲銀行', statementDay: 19, dueDay: 6 });
+  // 12/06 is a Sunday: pay on Friday 12/04
+  upsert(l, 'statements', { issuerId: 'iss_a', period: '2026-11', closingDate: '2026-11-19', dueDate: '2026-12-06', total: 9000, paidAmount: 0 });
+  // a bank without closing / due days: the date of its charges is a guess (30 days out → Saturday 12/26 → Friday 12/25)
+  upsert(l, 'issuers', { id: 'iss_b', name: '乙銀行' });
+  upsert(l, 'transactions', { date: '2026-11-20', amount: 3000, type: 'expense', source: 'card', issuerId: 'iss_b', merchant: 'x' });
+  upsert(l, 'bills', { name: '房租', category: '居住', amount: 10000, cycle: 'monthly', dueDay: 31, dueMonthOffset: -1, startMonth: '2026-11', payments: [{ period: '2026-11' }] });
+  upsert(l, 'bills', { kind: 'income', name: '薪資', category: '薪資', amount: 50000, cycle: 'monthly', dueDay: 5, startMonth: '2026-11', match: '公司' });
+  upsert(l, 'transactions', { date: '2026-11-05', amount: 50000, type: 'income', source: 'bank', category: '薪資', merchant: '公司' });
+  return l;
+}
+
+test('payment schedule: weekend payments move to Friday, estimates and guessed dates are marked', async () => {
+  const { paymentSchedule, payDate, yearEnd } = await import('../app/js/core/schedule.js');
+  assert.equal(payDate('2026-12-05'), '2026-12-04'); // Saturday
+  assert.equal(payDate('2026-12-06'), '2026-12-04'); // Sunday
+  assert.equal(payDate('2026-12-07'), '2026-12-07'); // Monday
+  assert.equal(yearEnd('2026-06-01'), '2026-12-31');
+  assert.equal(yearEnd('2026-12-20'), '2027-12-31', 'a year that is nearly over looks at the next one');
+
+  const s = paymentSchedule(scheduleLedger(40000), {}, '2026-11-26', { horizonDays: 60 });
+  assert.deepEqual(s.rows.map((r) => [r.date, r.balance]), [
+    ['2026-11-30', 30000], ['2026-12-04', 21000], ['2026-12-05', 71000], ['2026-12-25', 68000], ['2026-12-31', 58000], ['2027-01-05', 108000],
+  ]);
+  const card = s.rows[1].items[0];
+  assert.deepEqual([card.dueDate, card.shifted], ['2026-12-06', true]);
+  const guess = s.rows[3].items[0];
+  assert.deepEqual([guess.estimated, guess.dateGuess], [true, true]);
+  assert.equal(s.rows[0].items[0].estimated, undefined, 'rent is a fixed amount');
+  assert.equal(s.rows[2].items[0].shifted, false, 'income is not moved');
+  assert.deepEqual(s.warnings.guessed, ['乙銀行']);
+  assert.equal(s.estimatedTotal, 3000);
+  assert.equal(s.ok, true);
+  assert.equal(s.first, null);
+  assert.equal(s.totalNeed, 0);
+  assert.equal(s.cash.total, 40000);
+});
+
+test('payment schedule: how much has to be raised by when, and a later gap only needs the difference', async () => {
+  const { paymentSchedule } = await import('../app/js/core/schedule.js');
+  const l = scheduleLedger(5000);
+  upsert(l, 'ious', { person: '友', direction: 'iOwe', amount: 90000, dueDate: '2027-01-10' }); // Sunday → Friday 1/8
+  const s = paymentSchedule(l, {}, '2026-11-26', { horizonDays: 75 });
+  const by = Object.fromEntries(s.rows.map((r) => [r.date, r]));
+  // rent on 11/30 leaves −5000, the card bill on 12/04 −14000; salary on 12/05 brings it back
+  assert.deepEqual([by['2026-11-30'].shortfall, by['2026-11-30'].raise], [5000, 5000]);
+  assert.deepEqual([by['2026-12-04'].shortfall, by['2026-12-04'].raise, by['2026-12-04'].need], [14000, 9000, 14000]);
+  assert.equal(by['2026-12-05'].raise, 0);
+  // 1/8: repaying 90000 → −17000, then rent on Friday 1/29 (due Sunday 1/31) → −27000
+  assert.deepEqual([by['2027-01-08'].balance, by['2027-01-29'].balance], [-17000, -27000]);
+  assert.equal(s.episodes.length, 2);
+  assert.deepEqual(
+    s.episodes.map((e) => [e.start, e.end, e.amount, e.additional]),
+    [['2026-11-30', '2026-12-05', 14000, 14000], ['2027-01-08', '2027-02-05', 27000, 13000]],
+  );
+  assert.equal(s.totalNeed, 27000, 'money raised for the first gap is still there for the second');
+  assert.equal(s.ok, false);
+  assert.deepEqual([s.low.date, s.low.balance], ['2027-01-29', -27000]);
+});
+
+test('payment schedule: the overview alert only shows a gap that starts soon', async () => {
+  const { paymentAlert } = await import('../app/js/core/schedule.js');
+  assert.deepEqual(paymentAlert(scheduleLedger(5000), {}, '2026-11-26', 30), { start: '2026-11-30', end: '2026-12-05', amount: 14000, days: 4 });
+  assert.equal(paymentAlert(scheduleLedger(40000), {}, '2026-11-26', 30), null, 'enough money: no alert');
+  // repaying 70000 on 12/30 (34 days away) and the January rent on 12/31 leave a gap until the 1/5 salary
+  const l = scheduleLedger(40000);
+  upsert(l, 'ious', { person: '友', direction: 'iOwe', amount: 70000, dueDate: '2026-12-30' });
+  assert.equal(paymentAlert(l, {}, '2026-11-26', 30), null, 'it starts after the 30 days: not shown yet');
+  assert.deepEqual(paymentAlert(l, {}, '2026-11-26', 40), { start: '2026-12-30', end: '2027-01-05', amount: 12000, days: 34 });
+});
+
+test('payment schedule: an overdue payment is due today and keeps its original date', async () => {
+  const { paymentSchedule } = await import('../app/js/core/schedule.js');
+  const l = emptyLedger();
+  upsert(l, 'accounts', { name: '活存', type: 'bank', balance: 1000 });
+  upsert(l, 'issuers', { id: 'iss_a', name: '甲銀行', statementDay: 19, dueDay: 6 });
+  upsert(l, 'statements', { issuerId: 'iss_a', period: '2026-10', closingDate: '2026-10-19', dueDate: '2026-11-06', total: 4000, paidAmount: 0 });
+  const s = paymentSchedule(l, {}, '2026-11-26', { horizonDays: 30 });
+  assert.equal(s.rows.length, 1);
+  assert.deepEqual([s.rows[0].date, s.rows[0].items[0].dueDate, s.rows[0].shortfall], ['2026-11-26', '2026-11-06', 3000]);
+});

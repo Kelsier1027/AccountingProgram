@@ -30,6 +30,7 @@
 | `import-payslips` | 依 `data/payslips/payslips.json` 匯入薪資與獎金 |
 | `import-splits <CSV…> [--from YYYY-MM-DD]` | 分帳 App 帳期 CSV（原始檔放 `data/splits/`） |
 | `plan` / `forecast [--scenario expected]` | 可投入金額／資金缺口預警 |
+| `schedule [--days N \| --year]` | 備款時程：哪天前要備多少錢、繳哪些款項（只算已知繳款，預設 60 天） |
 | `list <collection>` | 列出記錄 |
 
 帳本若加密（`{"encrypted": true}`）需要使用者提供 `LEDGER_PASSPHRASE`，不要猜也不要寫進檔案。
