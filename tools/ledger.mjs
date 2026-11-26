@@ -261,19 +261,28 @@ try {
       break;
     }
     case 'bank': {
-      // create or update a bank: limit and closing / due days
+      // create or update a bank: limit and closing / due days; without any setting it only shows the bank
       if (!flags.bank) throw new Error('請用 --bank 指定銀行');
-      let b = findBank(ledger, flags.bank);
-      if (!b) b = ensureIssuer(ledger, String(flags.bank));
       const patch = {};
       if (flags.limit !== undefined) patch.limit = Number(flags.limit);
       if (flags['statement-day'] !== undefined) patch.statementDay = Number(flags['statement-day']);
       if (flags['due-day'] !== undefined) patch.dueDay = Number(flags['due-day']);
       if (flags.note !== undefined) patch.note = String(flags.note);
-      if (Object.keys(patch).length) upsert(ledger, 'issuers', { id: b.id, ...patch });
+      let b = findBank(ledger, flags.bank);
+      let changed = false;
+      if (!b) {
+        if (!Object.keys(patch).length) throw new Error(`找不到銀行 ${flags.bank}（要新增請一併指定 --limit、--statement-day、--due-day 或 --note）`);
+        b = ensureIssuer(ledger, String(flags.bank));
+        changed = true;
+      }
+      if (Object.entries(patch).some(([k, v]) => b[k] !== v)) {
+        upsert(ledger, 'issuers', { id: b.id, ...patch });
+        changed = true;
+      }
       const now = live(ledger.issuers).find((i) => i.id === b.id);
       console.log(`${now.name}：額度 ${now.limit ? formatMoney(now.limit) : '未設定'}，結帳日 ${now.statementDay ?? '—'}，繳款日 ${now.dueDay ?? '—'}`);
-      await save(ledger, wasEncrypted);
+      // saving stamps the whole ledger as just edited, which matters when devices merge: only write on a real change
+      if (changed) await save(ledger, wasEncrypted);
       break;
     }
     case 'add-statement': {
